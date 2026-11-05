@@ -573,8 +573,10 @@ def apply_bates_stamp(input_path, output_path, bates_prefix, start_number, posit
         positions = {
             'bottom-right': (page_width - margin - text_width, margin),
             'bottom-left': (margin, margin),
+            'bottom-middle': (page_width / 2 - text_width / 2, margin),
             'top-right': (page_width - margin - text_width, page_height - margin - size),
             'top-left': (margin, page_height - margin - size),
+            'top-middle': (page_width / 2 - text_width / 2, page_height - margin - size),
             'center': (page_width / 2 - text_width / 2, page_height / 2)
         }
         x, y = positions.get(position, positions['bottom-right'])
@@ -824,7 +826,7 @@ if __name__ == "__main__":
     parser.add_argument('--prefix', default='BATES-', help='Prefix for Bates numbers')
     parser.add_argument('--start', type=int, default=1, help='Starting Bates number')
     parser.add_argument('--position', default='bottom-right', 
-                        choices=['bottom-right', 'bottom-left', 'top-right', 'top-left', 'center'],
+                        choices=['bottom-right', 'bottom-left', 'bottom-middle', 'top-right', 'top-left', 'top-middle', 'center'],
                         help='Position of the Bates stamp')
     parser.add_argument('--color-preset', default=None,
                        choices=list(COLOR_PRESETS.keys()),

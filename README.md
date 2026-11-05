@@ -139,8 +139,10 @@ Notes:
 #### Available Positions
 - `bottom-right`
 - `bottom-left`
+- `bottom-middle`
 - `top-right`
 - `top-left`
+- `top-middle`
 - `center`
 
 ## Examples
