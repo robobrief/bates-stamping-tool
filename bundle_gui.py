@@ -260,6 +260,8 @@ def merge_bundle_from_ordered_list(
     index_rows: Sequence[IndexRow],
     output_pdf: Path,
     log: Callable[[str], None],
+    *,
+    preserve_source_bookmarks: bool = True,
 ) -> List[PaginationRow]:
     if len(pdf_paths) != len(index_rows):
         raise RuntimeError(
@@ -281,11 +283,15 @@ def merge_bundle_from_ordered_list(
 
         for p in reader.pages:
             writer.add_page(p)
-        writer.add_outline_item(
-            bookmark_label(row.citation, row.case_title),
+
+        document_label = bookmark_label(row.citation, row.case_title)
+        doc_parent = writer.add_outline_item(
+            document_label,
             start - 1,
             parent=navigate_parent,
         )
+        if preserve_source_bookmarks:
+            copy_outline_shifted(reader, writer, start - 1, parent=doc_parent)
 
         pagination.append(
             PaginationRow(
@@ -1052,7 +1058,7 @@ try {{
         )
 
 
-def copy_outline_shifted(reader: PypdfReader, writer: PdfWriter, shift: int) -> None:
+def copy_outline_shifted(reader: PypdfReader, writer: PdfWriter, shift: int, parent=None) -> None:
     try:
         source_outline = reader.outline
     except Exception:
@@ -1060,13 +1066,13 @@ def copy_outline_shifted(reader: PypdfReader, writer: PdfWriter, shift: int) -> 
     if not source_outline:
         return
 
-    def walk(items, parent=None):
+    def walk(items, current_parent=None):
         if not items:
             return
         last = None
         for item in items:
             if isinstance(item, list):
-                walk(item, last if last is not None else parent)
+                walk(item, last if last is not None else current_parent)
                 continue
             title = getattr(item, "title", None)
             if not title:
@@ -1080,9 +1086,9 @@ def copy_outline_shifted(reader: PypdfReader, writer: PdfWriter, shift: int) -> 
             if pnum is None:
                 last = None
                 continue
-            last = writer.add_outline_item(title, pnum + shift, parent=parent)
+            last = writer.add_outline_item(title, pnum + shift, parent=current_parent)
 
-    walk(source_outline)
+    walk(source_outline, parent)
 
 
 def _copy_page_labels(reader: PypdfReader, writer: PdfWriter) -> None:
@@ -1334,8 +1340,36 @@ def add_full_row_links(
             return value
         return None
 
+    def line_looks_like_page_range(text: str) -> bool:
+        t = normalize_text(text)
+        if not t:
+            return False
+        # Accept ranges like "1-8" and letter-prefixed forms like "A1-A8",
+        # but reject UUID-like fragments or other long hyphen chains.
+        if len(t) > 40:
+            return False
+        parts = re.split(r"\s*[-–]\s*", t)
+        if len(parts) != 2:
+            return False
+        left = parts[0].strip()
+        right = parts[1].strip()
+        if not left or not right:
+            return False
+
+        def looks_like_label(segment: str) -> bool:
+            if len(segment) > 12:
+                return False
+            if not re.fullmatch(r"[A-Za-z0-9]+", segment):
+                return False
+            return bool(re.search(r"\d", segment))
+
+        if not looks_like_label(left) or not looks_like_label(right):
+            return False
+        return True
+
     def extract_start_page(row_vals: Sequence[object], row_obj, page_obj) -> Optional[int]:
-        for cell in reversed(list(row_vals)):
+        trailing_vals = list(row_vals[-3:]) if row_vals else []
+        for cell in reversed(trailing_vals):
             token = normalize_text(str(cell or ""))
             if not token:
                 continue
@@ -1344,7 +1378,8 @@ def add_full_row_links(
                 return parsed
         cell_boxes = getattr(row_obj, "cells", None)
         if cell_boxes:
-            for cell_bbox in reversed(cell_boxes):
+            trailing_boxes = list(cell_boxes[-3:])
+            for cell_bbox in reversed(trailing_boxes):
                 if not cell_bbox:
                     continue
                 try:
@@ -1393,21 +1428,137 @@ def add_full_row_links(
         seen.add(key)
         return True
 
-    expected_iter = iter(expected_start_pages or [])
+    def estimate_visual_rows_on_page(page_obj) -> int:
+        words = page_obj.get_text("words")
+        line_groups: Dict[Tuple[int, int], List[tuple]] = {}
+        for w in words:
+            x0, y0, x1, y1, text, block_no, line_no, *_ = w
+            key = (int(block_no), int(line_no))
+            line_groups.setdefault(key, []).append((x0, y0, x1, y1, str(text or "")))
+        count = 0
+        for key in sorted(line_groups.keys()):
+            line_words = sorted(line_groups[key], key=lambda t: t[0])
+            if not line_words:
+                continue
+            full_line = " ".join(normalize_text(t[4]) for t in line_words).strip().lower()
+            if not full_line or ("description" in full_line and "page" in full_line):
+                continue
+            if line_looks_like_page_range(full_line):
+                count += 1
+        return count
+
     expected_pending = list(expected_start_pages or [])
     expected_pos = 0
 
     for pno in range(index_page_count):
         page = doc[pno]
         seen_link_keys = set()
-        for lnk in page.get_links() or []:
-            if lnk.get("kind") != pymupdf.LINK_GOTO:
-                continue
-            from_rect = lnk.get("from")
-            target_page = int(lnk.get("page", -1))
-            if from_rect is None or target_page < 0:
-                continue
-            seen_link_keys.add(rect_key(pymupdf.Rect(from_rect), target_page))
+        if expected_pending:
+            for lnk in list(page.get_links() or []):
+                if lnk.get("kind") != pymupdf.LINK_GOTO:
+                    continue
+                try:
+                    page.delete_link(lnk)
+                except Exception:
+                    continue
+            words = page.get_text("words")
+            tables = getattr(page.find_tables(), "tables", []) or []
+            table_bounds = None
+            if tables:
+                table_bounds = (
+                    min(t.bbox[0] for t in tables),
+                    min(t.bbox[1] for t in tables),
+                    max(t.bbox[2] for t in tables),
+                    max(t.bbox[3] for t in tables),
+                )
+            line_groups: Dict[Tuple[int, int], List[tuple]] = {}
+            for w in words:
+                x0, y0, x1, y1, text, block_no, line_no, *_ = w
+                key = (int(block_no), int(line_no))
+                line_groups.setdefault(key, []).append((x0, y0, x1, y1, str(text or "")))
+
+            lines: List[Dict[str, object]] = []
+            for key in sorted(line_groups.keys()):
+                line_words = sorted(line_groups[key], key=lambda t: t[0])
+                if not line_words:
+                    continue
+                full_line = " ".join(normalize_text(t[4]) for t in line_words).strip()
+                full_line_lower = full_line.lower()
+                if not full_line:
+                    continue
+                line_x0 = min(w[0] for w in line_words)
+                line_y0 = min(w[1] for w in line_words)
+                line_x1 = max(w[2] for w in line_words)
+                line_y1 = max(w[3] for w in line_words)
+                if table_bounds is not None:
+                    _tx0, ty0, _tx1, ty1 = table_bounds
+                    line_mid_y = (line_y0 + line_y1) / 2.0
+                    if line_mid_y < (ty0 - 3.0) or line_mid_y > (ty1 + 3.0):
+                        continue
+                is_header = ("description" in full_line_lower and "page" in full_line_lower)
+                has_range = line_looks_like_page_range(full_line)
+                lines.append(
+                    {
+                        "x0": line_x0,
+                        "y0": line_y0,
+                        "x1": line_x1,
+                        "y1": line_y1,
+                        "is_header": is_header,
+                        "has_range": has_range,
+                    }
+                )
+
+            row_rects: List[pymupdf.Rect] = []
+            for idx, line in enumerate(lines):
+                if not line.get("has_range"):
+                    continue
+                y0 = float(line["y0"])
+                y1 = float(line["y1"])
+                x0 = float(line["x0"])
+                x1 = float(line["x1"])
+                if idx > 0:
+                    prev = lines[idx - 1]
+                    if (
+                        not prev.get("is_header")
+                        and not prev.get("has_range")
+                        and (y0 - float(prev["y1"])) < 24.0
+                    ):
+                        y0 = min(y0, float(prev["y0"]))
+                        x0 = min(x0, float(prev["x0"]))
+                        x1 = max(x1, float(prev["x1"]))
+
+                if table_bounds is not None:
+                    tx0, _ty0, tx1, _ty1 = table_bounds
+                    x0 = float(tx0)
+                    x1 = float(tx1)
+
+                row_rects.append(
+                    pymupdf.Rect(
+                        max(0.0, x0 - 2.0),
+                        max(0.0, y0 - 1.0),
+                        min(page.rect.width, x1 + 2.0),
+                        min(page.rect.height, y1 + 1.0),
+                    )
+                )
+
+            for rect in sorted(row_rects, key=lambda r: (round(r.y0, 2), round(r.x0, 2))):
+                if expected_pos >= len(expected_pending):
+                    break
+                start_page = expected_pending[expected_pos]
+                target = index_page_count + int(start_page) - 1
+                if add_link_if_new(page, rect, target, seen_link_keys):
+                    links_added += 1
+                expected_pos += 1
+            continue
+        else:
+            for lnk in page.get_links() or []:
+                if lnk.get("kind") != pymupdf.LINK_GOTO:
+                    continue
+                from_rect = lnk.get("from")
+                target_page = int(lnk.get("page", -1))
+                if from_rect is None or target_page < 0:
+                    continue
+                seen_link_keys.add(rect_key(pymupdf.Rect(from_rect), target_page))
 
         tf = page.find_tables()
         tables = getattr(tf, "tables", []) if tf is not None else []
@@ -1429,17 +1580,57 @@ def add_full_row_links(
                     pymupdf.Rect(rb[0] + 1.0, rb[1] + 1.0, rb[2] - 1.0, rb[3] - 1.0)
                 )
 
-                page_num = extract_start_page(row_vals, row, page)
-                if page_num is None:
-                    continue
+                if not expected_pending:
+                    page_num = extract_start_page(row_vals, row, page)
+                    if page_num is None:
+                        continue
 
-                target = index_page_count + page_num - 1
-                rect = table_row_rects[-1]
-                if add_link_if_new(page, rect, target, seen_link_keys):
-                    links_added += 1
+                    target = index_page_count + page_num - 1
+                    rect = table_row_rects[-1]
+                    if add_link_if_new(page, rect, target, seen_link_keys):
+                        links_added += 1
 
         if expected_pending and table_row_rects:
-            for rect in sorted(table_row_rects, key=lambda r: (round(r.y0, 2), round(r.x0, 2))):
+            ordered_table_rects = sorted(table_row_rects, key=lambda r: (round(r.y0, 2), round(r.x0, 2)))
+            remaining = len(expected_pending) - expected_pos
+            desired_rows = remaining
+            estimated_rows = estimate_visual_rows_on_page(page)
+            if estimated_rows > 0:
+                desired_rows = min(remaining, estimated_rows)
+            if len(ordered_table_rects) > desired_rows > 0:
+                gaps: List[Tuple[float, int]] = []
+                for i in range(len(ordered_table_rects) - 1):
+                    gap = float(ordered_table_rects[i + 1].y0 - ordered_table_rects[i].y1)
+                    gaps.append((gap, i))
+                split_count = min(desired_rows - 1, len(ordered_table_rects) - 1)
+                split_after = sorted(
+                    i for _gap, i in sorted(gaps, key=lambda it: it[0], reverse=True)[:split_count]
+                )
+
+                grouped: List[List[pymupdf.Rect]] = []
+                current_group: List[pymupdf.Rect] = []
+                split_set = set(split_after)
+                for i, rect in enumerate(ordered_table_rects):
+                    current_group.append(rect)
+                    if i in split_set:
+                        grouped.append(current_group)
+                        current_group = []
+                if current_group:
+                    grouped.append(current_group)
+
+                table_x0 = max(0.0, min(r.x0 for r in ordered_table_rects))
+                table_x1 = min(page.rect.width, max(r.x1 for r in ordered_table_rects))
+                ordered_table_rects = [
+                    pymupdf.Rect(
+                        table_x0,
+                        max(0.0, min(r.y0 for r in grp)),
+                        table_x1,
+                        min(page.rect.height, max(r.y1 for r in grp)),
+                    )
+                    for grp in grouped
+                ]
+
+            for rect in ordered_table_rects:
                 if expected_pos >= len(expected_pending):
                     break
                 start_page = expected_pending[expected_pos]
@@ -1448,63 +1639,64 @@ def add_full_row_links(
                     links_added += 1
                 expected_pos += 1
 
-        # Robust fallback for Word-exported PDFs: line-based detection by text blocks.
-        words = page.get_text("words")
-        line_groups: Dict[Tuple[int, int], List[tuple]] = {}
-        for w in words:
-            x0, y0, x1, y1, text, block_no, line_no, *_ = w
-            key = (int(block_no), int(line_no))
-            line_groups.setdefault(key, []).append((x0, y0, x1, y1, str(text or "")))
+        if not expected_pending:
+            # Robust fallback for Word-exported PDFs: line-based detection by text blocks.
+            words = page.get_text("words")
+            line_groups: Dict[Tuple[int, int], List[tuple]] = {}
+            for w in words:
+                x0, y0, x1, y1, text, block_no, line_no, *_ = w
+                key = (int(block_no), int(line_no))
+                line_groups.setdefault(key, []).append((x0, y0, x1, y1, str(text or "")))
 
-        seen_rows = set()
-        for key in sorted(line_groups.keys()):
-            line_words = sorted(line_groups[key], key=lambda t: t[0])
-            if not line_words:
-                continue
-            full_line = " ".join(normalize_text(t[4]) for t in line_words).strip().lower()
-            if not full_line or ("description" in full_line and "page" in full_line):
-                continue
-
-            candidate = None
-            candidate_x = None
-            for x0, y0, x1, y1, text in reversed(line_words):
-                token = normalize_text(text)
-                if not token:
+            seen_rows = set()
+            for key in sorted(line_groups.keys()):
+                line_words = sorted(line_groups[key], key=lambda t: t[0])
+                if not line_words:
                     continue
-                cx = (x0 + x1) / 2
-                if cx < (page.rect.width * 0.58):
+                full_line = " ".join(normalize_text(t[4]) for t in line_words).strip().lower()
+                if not full_line or ("description" in full_line and "page" in full_line):
                     continue
-                parsed = parse_token_for_start(token)
-                if parsed is None or parsed not in valid_starts:
+
+                candidate = None
+                candidate_x = None
+                for x0, y0, x1, y1, text in reversed(line_words):
+                    token = normalize_text(text)
+                    if not token:
+                        continue
+                    cx = (x0 + x1) / 2
+                    if cx < (page.rect.width * 0.58):
+                        continue
+                    parsed = parse_token_for_start(token)
+                    if parsed is None or parsed not in valid_starts:
+                        continue
+                    candidate = parsed
+                    candidate_x = cx
+                    break
+                if candidate is None:
                     continue
-                candidate = parsed
-                candidate_x = cx
-                break
-            if candidate is None:
-                continue
 
-            # Avoid accidental links where the "page" token is not clearly in the right-most area.
-            if candidate_x is None or candidate_x < (page.rect.width * 0.58):
-                continue
+                # Avoid accidental links where the "page" token is not clearly in the right-most area.
+                if candidate_x is None or candidate_x < (page.rect.width * 0.58):
+                    continue
 
-            y_min = min(w[1] for w in line_words)
-            y_max = max(w[3] for w in line_words)
-            x_min = min(w[0] for w in line_words)
-            x_max = max(w[2] for w in line_words)
-            row_key = (round(y_min, 1), round(y_max, 1), candidate)
-            if row_key in seen_rows:
-                continue
-            seen_rows.add(row_key)
+                y_min = min(w[1] for w in line_words)
+                y_max = max(w[3] for w in line_words)
+                x_min = min(w[0] for w in line_words)
+                x_max = max(w[2] for w in line_words)
+                row_key = (round(y_min, 1), round(y_max, 1), candidate)
+                if row_key in seen_rows:
+                    continue
+                seen_rows.add(row_key)
 
-            target = index_page_count + candidate - 1
-            rect = pymupdf.Rect(
-                max(0, x_min - 2),
-                max(0, y_min - 1),
-                min(page.rect.width, x_max + 2),
-                min(page.rect.height, y_max + 1),
-            )
-            if add_link_if_new(page, rect, target, seen_link_keys):
-                links_added += 1
+                target = index_page_count + candidate - 1
+                rect = pymupdf.Rect(
+                    max(0, x_min - 2),
+                    max(0, y_min - 1),
+                    min(page.rect.width, x_max + 2),
+                    min(page.rect.height, y_max + 1),
+                )
+                if add_link_if_new(page, rect, target, seen_link_keys):
+                    links_added += 1
 
     # Last resort: sequential row linking by expected order over line rows
     if expected_pending and expected_pos < len(expected_pending):
@@ -1549,6 +1741,45 @@ def add_full_row_links(
                         min(page.rect.height, y_max + 1),
                     )
                 )
+
+            if row_rects:
+                remaining = len(expected_pending) - expected_pos
+                ordered = sorted(row_rects, key=lambda r: (round(r.y0, 2), round(r.x0, 2)))
+                if len(ordered) > remaining > 0:
+                    gaps: List[Tuple[float, int]] = []
+                    for i in range(len(ordered) - 1):
+                        gap = float(ordered[i + 1].y0 - ordered[i].y1)
+                        gaps.append((gap, i))
+                    split_count = min(remaining - 1, len(ordered) - 1)
+                    split_after = sorted(i for _gap, i in sorted(gaps, key=lambda it: it[0], reverse=True)[:split_count])
+
+                    grouped: List[List[pymupdf.Rect]] = []
+                    current_group: List[pymupdf.Rect] = []
+                    split_set = set(split_after)
+                    for i, rect in enumerate(ordered):
+                        current_group.append(rect)
+                        if i in split_set:
+                            grouped.append(current_group)
+                            current_group = []
+                    if current_group:
+                        grouped.append(current_group)
+
+                    table_x0 = max(0.0, min(r.x0 for r in ordered))
+                    table_x1 = min(page.rect.width, max(r.x1 for r in ordered))
+                    merged_rects: List[pymupdf.Rect] = []
+                    for grp in grouped:
+                        merged_rects.append(
+                            pymupdf.Rect(
+                                table_x0,
+                                max(0.0, min(r.y0 for r in grp)),
+                                table_x1,
+                                min(page.rect.height, max(r.y1 for r in grp)),
+                            )
+                        )
+                    row_rects = merged_rects
+                else:
+                    row_rects = ordered
+
             for rect in row_rects:
                 if expected_pos >= len(expected_pending):
                     break
@@ -1683,6 +1914,7 @@ class BundleGui(tk.Tk):
         self.output_name = tk.StringVar(value="Authorities Bundle Final.pdf")
         self.include_index = tk.BooleanVar(value=True)
         self.link_rows = tk.BooleanVar(value=True)
+        self.preserve_source_bookmarks = tk.BooleanVar(value=True)
         self.compress_pdf = tk.BooleanVar(value=True)
         self.open_outlines = tk.BooleanVar(value=True)
         self.generate_index_from_template = tk.BooleanVar(value=True)
@@ -2237,6 +2469,7 @@ class BundleGui(tk.Tk):
         ttk.Label(name_row, text="Final output filename", width=22).pack(side="left")
         ttk.Entry(name_row, textvariable=self.output_name).pack(side="left", fill="x", expand=True, padx=8)
 
+        ttk.Checkbutton(output_box, text="Preserve source document bookmarks during merge", variable=self.preserve_source_bookmarks).pack(anchor="w", pady=4)
         ttk.Checkbutton(output_box, text="Compress final PDF", variable=self.compress_pdf).pack(anchor="w", pady=4)
         ttk.Checkbutton(output_box, text="Open with bookmarks panel (/UseOutlines)", variable=self.open_outlines).pack(anchor="w", pady=4)
         ttk.Label(
@@ -2370,6 +2603,7 @@ class BundleGui(tk.Tk):
             "output_name": self.output_name.get(),
             "include_index": bool(self.include_index.get()),
             "link_rows": bool(self.link_rows.get()),
+            "preserve_source_bookmarks": bool(self.preserve_source_bookmarks.get()),
             "compress_pdf": bool(self.compress_pdf.get()),
             "open_outlines": bool(self.open_outlines.get()),
             "generate_index_from_template": bool(self.generate_index_from_template.get()),
@@ -2479,6 +2713,7 @@ class BundleGui(tk.Tk):
         return {
             "include_index": True,
             "link_rows": True,
+            "preserve_source_bookmarks": True,
             "compress_pdf": True,
             "open_outlines": True,
             "generate_index_from_template": True,
@@ -2527,6 +2762,7 @@ class BundleGui(tk.Tk):
         self.output_name.set(str(data.get("output_name", self.output_name.get())))
         self.include_index.set(bool(data.get("include_index", self.include_index.get())))
         self.link_rows.set(bool(data.get("link_rows", self.link_rows.get())))
+        self.preserve_source_bookmarks.set(bool(data.get("preserve_source_bookmarks", self.preserve_source_bookmarks.get())))
         self.compress_pdf.set(bool(data.get("compress_pdf", self.compress_pdf.get())))
         self.open_outlines.set(bool(data.get("open_outlines", self.open_outlines.get())))
         self.generate_index_from_template.set(bool(data.get("generate_index_from_template", self.generate_index_from_template.get())))
@@ -2699,7 +2935,13 @@ class BundleGui(tk.Tk):
 
             merged_pdf = output_folder / "_bundle_merged_no_index.pdf"
             self._log("Merging ordered PDFs and creating document bookmarks...")
-            pagination = merge_bundle_from_ordered_list(pdf_list, index_rows, merged_pdf, self._log)
+            pagination = merge_bundle_from_ordered_list(
+                pdf_list,
+                index_rows,
+                merged_pdf,
+                self._log,
+                preserve_source_bookmarks=bool(self.preserve_source_bookmarks.get()),
+            )
             self._log(f"Merged bundle pages: {sum(r.source_pages for r in pagination)}")
 
             report_csv = output_folder / "authorities_bundle_pagination_report.csv"
@@ -2905,6 +3147,12 @@ class BundleGui(tk.Tk):
                 self._log("Setting PDF to open with bookmarks panel...")
                 set_open_outlines_in_place(final_pdf)
 
+            output_name = normalize_text(self.output_name.get()) or "Authorities Bundle Final.pdf"
+            if not output_name.lower().endswith(".pdf"):
+                output_name += ".pdf"
+            target = output_folder / output_name
+            final_pdf.replace(target)
+
             if include_index_enabled and link_rows_enabled and index_pages_for_links:
                 self._log("Adding full-row index hyperlinks...")
                 expected_starts = None
@@ -2916,18 +3164,12 @@ class BundleGui(tk.Tk):
                         use_existing_index_descriptions=use_existing_desc_enabled,
                     )
                 links = add_full_row_links(
-                    final_pdf,
+                    target,
                     pagination,
                     index_pages_for_links,
                     expected_start_pages=expected_starts,
                 )
                 self._log(f"Full-row links added: {links}")
-
-            output_name = normalize_text(self.output_name.get()) or "Authorities Bundle Final.pdf"
-            if not output_name.lower().endswith(".pdf"):
-                output_name += ".pdf"
-            target = output_folder / output_name
-            final_pdf.replace(target)
 
             self._log("")
             self._log("Pipeline complete.")
