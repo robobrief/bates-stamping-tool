@@ -107,6 +107,7 @@ Use [bundle_gui.py](/C:/github/bates-stamping-tool/bundle_gui.py) for an end-to-
 - save/load full reusable profiles (paths, PDF order, build options, stamp options).
 - one-click **Load Preferred Defaults** button for your standard setup (no prefix, page-label numbering, reverse-blue, bottom-right, linking/compression/outlines enabled).
 - combined **Inputs & PDF Order** tab.
+- added **Help / Instructions** tab with a recommended run sequence and mode guidance.
 - separate **Index Settings**, **Page Label Settings**, and **Output** tabs.
 - separate preferred-default actions: build-only defaults, stamp-only defaults, or all defaults.
 - stamp mode guidance in-app (`annotation` overlay vs `merge` content merge).

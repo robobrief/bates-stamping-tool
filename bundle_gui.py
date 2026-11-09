@@ -1720,22 +1720,56 @@ class BundleGui(tk.Tk):
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
 
+        tab_help = ttk.Frame(notebook)
         tab_sources_order = ttk.Frame(notebook)
         tab_index_settings = ttk.Frame(notebook)
         tab_stamp = ttk.Frame(notebook)
         tab_output = ttk.Frame(notebook)
         tab_run = ttk.Frame(notebook)
-        notebook.add(tab_sources_order, text="Inputs & PDF Order")
-        notebook.add(tab_index_settings, text="Index Settings")
-        notebook.add(tab_stamp, text="Page Label Settings")
-        notebook.add(tab_output, text="Output")
-        notebook.add(tab_run, text="Run")
+        notebook.add(tab_help, text="0. Help / Instructions")
+        notebook.add(tab_sources_order, text="1. Inputs & PDF Order")
+        notebook.add(tab_index_settings, text="2. Index Settings")
+        notebook.add(tab_stamp, text="3. Page Label Settings")
+        notebook.add(tab_output, text="4. Output")
+        notebook.add(tab_run, text="5. Run")
 
+        self._build_help_tab(tab_help)
         self._build_sources_order_tab(tab_sources_order)
         self._build_settings_tab(tab_index_settings)
         self._build_stamp_tab(tab_stamp)
         self._build_output_tab(tab_output)
         self._build_run_tab(tab_run)
+
+    def _build_help_tab(self, parent: ttk.Frame) -> None:
+        frm = self._make_scrollable_tab_body(parent)
+        ttk.Label(frm, text="Recommended workflow", font=("", 11, "bold")).pack(anchor="w", pady=(4, 6))
+        steps = [
+            "1) Inputs & PDF Order: choose source/index/output and set the PDF order.",
+            "2) Index Settings: choose whether to generate index tables or update existing tables only.",
+            "3) Page Label Settings: choose stamp prefix/number source and bookmark options.",
+            "4) Output: confirm final PDF name and output options.",
+            "5) Run: execute pipeline and review log output.",
+        ]
+        for s in steps:
+            ttk.Label(frm, text=s).pack(anchor="w", pady=1)
+
+        ttk.Label(frm, text="Common modes", font=("", 11, "bold")).pack(anchor="w", pady=(12, 6))
+        ttk.Label(
+            frm,
+            text="• Generate new tables: Generate index tables from template = ON, Use descriptions already in index DOCX = OFF",
+        ).pack(anchor="w", pady=1)
+        ttk.Label(
+            frm,
+            text="• Update existing tables only: Generate index tables from template = ON, Use descriptions already in index DOCX = ON",
+        ).pack(anchor="w", pady=1)
+
+        ttk.Label(frm, text="Placeholder seed table", font=("", 11, "bold")).pack(anchor="w", pady=(12, 6))
+        ttk.Label(
+            frm,
+            text="To keep Word table styles in a template, include a seed table marked [[INDEX_TABLE_PLACEHOLDER]]; it will be removed during generation.",
+            wraplength=1020,
+            justify="left",
+        ).pack(anchor="w", pady=1)
 
     def _make_scrollable_tab_body(self, parent: ttk.Frame) -> ttk.Frame:
         container = ttk.Frame(parent)
