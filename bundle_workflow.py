@@ -7,7 +7,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PyPDF2 import PdfReader, PdfWriter
+try:
+    from PyPDF2 import PdfReader, PdfWriter
+except ModuleNotFoundError as exc:
+    raise SystemExit(
+        "Missing required Python dependencies for the bundle workflow.\n"
+        "Install them with:\n"
+        "  python -m pip install -r requirements.txt\n"
+        "or install the packages manually:\n"
+        "  python -m pip install PyPDF2 python-docx"
+    ) from exc
 
 
 REQUIRED_INDEX_COLUMNS = ["Citation", "Case title", "C ¶", "D2 ¶", "Page"]

@@ -14,16 +14,25 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from pypdf import PdfReader as PypdfReader
-from pypdf import PdfWriter
-from pypdf.constants import PageLabelStyle
-from pypdf.generic import NameObject
-from docx import Document
-from docx.enum.style import WD_STYLE_TYPE
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Cm
+try:
+    from pypdf import PdfReader as PypdfReader
+    from pypdf import PdfWriter
+    from pypdf.constants import PageLabelStyle
+    from pypdf.generic import NameObject
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm
+except ModuleNotFoundError as exc:
+    raise SystemExit(
+        "Missing required Python dependencies for the bundle GUI.\n"
+        "Install them with:\n"
+        "  python -m pip install -r requirements.txt\n"
+        "or install the packages manually:\n"
+        "  python -m pip install PyPDF2 pypdf reportlab python-docx pymupdf pikepdf"
+    ) from exc
 
 
 REQUIRED_COLUMNS = ["Citation", "Case title", "C ¶", "D2 ¶", "Page"]

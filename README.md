@@ -24,7 +24,11 @@ A Python utility for batch Bates stamping of PDF documents. This tool allows you
 - Python 3.6+
 - Required Python packages:
   - PyPDF2
+  - pypdf
   - reportlab
+  - python-docx
+  - pymupdf
+  - pikepdf
 
 Optional but recommended:
 - Ghostscript (for better PDF flattening)
@@ -32,10 +36,16 @@ Optional but recommended:
 ## Installation
 
 1. Clone or download this repository
-2. Install required Python packages:
+2. Install the project dependencies:
 
 ```bash
-pip install PyPDF2 reportlab
+python -m pip install -r requirements.txt
+```
+
+If you prefer to install just the basic stamper packages:
+
+```bash
+python -m pip install PyPDF2 reportlab
 ```
 
 3. (Optional) Install Ghostscript for better PDF flattening:

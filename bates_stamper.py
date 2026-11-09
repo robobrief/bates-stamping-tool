@@ -4,13 +4,23 @@ import subprocess
 import shutil
 import tempfile
 import uuid
-from PyPDF2 import PdfReader, PdfWriter
-from PyPDF2.generic import NameObject, DictionaryObject, ArrayObject, FloatObject, DecodedStreamObject, NumberObject, TextStringObject
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.colors import HexColor
-from reportlab.pdfbase import pdfmetrics
 from io import BytesIO
+
+try:
+    from PyPDF2 import PdfReader, PdfWriter
+    from PyPDF2.generic import NameObject, DictionaryObject, ArrayObject, FloatObject, DecodedStreamObject, NumberObject, TextStringObject
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.colors import HexColor
+    from reportlab.pdfbase import pdfmetrics
+except ModuleNotFoundError as exc:
+    raise SystemExit(
+        "Missing required Python dependencies for the Bates stamper.\n"
+        "Install them with:\n"
+        "  python -m pip install -r requirements.txt\n"
+        "or install the packages manually:\n"
+        "  python -m pip install PyPDF2 reportlab"
+    ) from exc
 
 STAMP_FONT = "Helvetica-Bold"
 STAMP_ANNOTATION_AUTHOR = "BatesStamper"
