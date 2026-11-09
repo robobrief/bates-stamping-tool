@@ -18,70 +18,70 @@ STAMP_ANNOTATION_SUBJECT = "Bates Stamp"
 STAMP_ANNOTATION_NAME_PREFIX = "BatesStamper-"
 COLOR_PRESETS = {
     "black": {
-        "label": "Black",
+        "label": "Black, no background",
         "text_color": "#000000",
         "background_box": False,
         "box_color": None,
         "use_case": "Most common"
     },
     "white": {
-        "label": "White",
+        "label": "White, no background",
         "text_color": "#FFFFFF",
         "background_box": False,
         "box_color": None,
         "use_case": "Dark PDFs"
     },
     "red": {
-        "label": "Red",
+        "label": "Red, no background",
         "text_color": "#FF0000",
         "background_box": False,
         "box_color": None,
         "use_case": "Privileged / review"
     },
     "black-box": {
-        "label": "Black Box",
+        "label": "Black on white",
         "text_color": "#000000",
         "background_box": True,
         "box_color": "#FFFFFF",
         "use_case": "Maximum readability"
     },
     "white-box": {
-        "label": "White Box",
+        "label": "White on black",
         "text_color": "#FFFFFF",
         "background_box": True,
         "box_color": "#000000",
         "use_case": "Dark drawings"
     },
     "red-box": {
-        "label": "Red Box",
+        "label": "Red on white",
         "text_color": "#FF0000",
         "background_box": True,
         "box_color": "#FFFFFF",
         "use_case": "Review copies"
     },
     "reverse-red": {
-        "label": "Reverse Red",
+        "label": "White on red",
         "text_color": "#FFFFFF",
         "background_box": True,
         "box_color": "#FF0000",
         "use_case": "Very visible"
     },
     "blue-box": {
-        "label": "Blue Box",
+        "label": "Blue on white",
         "text_color": "#0000FF",
         "background_box": True,
         "box_color": "#FFFFFF",
         "use_case": "Production sets"
     },
     "reverse-blue": {
-        "label": "Reverse Blue",
+        "label": "White on blue",
         "text_color": "#FFFFFF",
         "background_box": True,
         "box_color": "#0000FF",
         "use_case": "Internal numbering"
     },
     "highlight": {
-        "label": "Highlight",
+        "label": "Black on yellow",
         "text_color": "#000000",
         "background_box": True,
         "box_color": "#FFFF00",
@@ -559,6 +559,12 @@ def apply_bates_stamp(input_path, output_path, bates_prefix, start_number, posit
         # Get page dimensions
         page_width = float(page.mediabox.width)
         page_height = float(page.mediabox.height)
+        crop_left = float(page.cropbox.left)
+        crop_bottom = float(page.cropbox.bottom)
+        crop_right = float(page.cropbox.right)
+        crop_top = float(page.cropbox.top)
+        visible_width = crop_right - crop_left
+        visible_height = crop_top - crop_bottom
         
         # Calculate text width (approximate)
         if number_source == 'page-label' and page_labels:
@@ -569,15 +575,15 @@ def apply_bates_stamp(input_path, output_path, bates_prefix, start_number, posit
         stamp_labels.append(bates_number)
         text_width, _, _, _ = get_text_metrics(bates_number, size=size)
         
-        # Define positions based on actual page dimensions
+        # Define positions based on visible crop area so stamps remain visible on cropped pages.
         positions = {
-            'bottom-right': (page_width - margin - text_width, margin),
-            'bottom-left': (margin, margin),
-            'bottom-middle': (page_width / 2 - text_width / 2, margin),
-            'top-right': (page_width - margin - text_width, page_height - margin - size),
-            'top-left': (margin, page_height - margin - size),
-            'top-middle': (page_width / 2 - text_width / 2, page_height - margin - size),
-            'center': (page_width / 2 - text_width / 2, page_height / 2)
+            'bottom-right': (crop_left + visible_width - margin - text_width, crop_bottom + margin),
+            'bottom-left': (crop_left + margin, crop_bottom + margin),
+            'bottom-middle': (crop_left + visible_width / 2 - text_width / 2, crop_bottom + margin),
+            'top-right': (crop_left + visible_width - margin - text_width, crop_bottom + visible_height - margin - size),
+            'top-left': (crop_left + margin, crop_bottom + visible_height - margin - size),
+            'top-middle': (crop_left + visible_width / 2 - text_width / 2, crop_bottom + visible_height - margin - size),
+            'center': (crop_left + visible_width / 2 - text_width / 2, crop_bottom + visible_height / 2)
         }
         x, y = positions.get(position, positions['bottom-right'])
         

@@ -51,6 +51,93 @@ Download and install from [Ghostscript official site](https://www.ghostscript.co
 
 ## Usage
 
+## Authorities Bundle Workflow (Word index + ordered merge)
+
+This repository also includes [bundle_workflow.py](/C:/github/bates-stamping-tool/bundle_workflow.py), a local-only workflow for:
+
+- reading the authoritative row order from a Word index (`.docx`),
+- inventorying and matching source PDFs,
+- producing an editable manifest and review reports before merge,
+- merging only approved entries in order,
+- creating one top-level bookmark per entry as `Citation:: Case title`,
+- generating pagination and validation reports.
+
+### Additional dependency
+
+Required for Word index reading:
+
+```bash
+pip install python-docx
+```
+
+### Two-step run
+
+1) Prepare (manifest + review outputs; no merge):
+
+```bash
+python bundle_workflow.py prepare --source-folder "C:\path\to\pdfs" --word-index "C:\path\to\index.docx" --output-folder "C:\path\to\output" --output-pdf-name "Authorities Bundle.pdf"
+```
+
+2) After reviewing/editing the manifest, merge approved rows:
+
+```bash
+python bundle_workflow.py merge --source-folder "C:\path\to\pdfs" --output-folder "C:\path\to\output" --output-pdf-name "Authorities Bundle.pdf" --manifest "C:\path\to\output\authorities_bundle_manifest.csv" --include-index-pdf ask
+```
+
+3) Populate the Word index `Page` column from merged pagination (writes to a copy):
+
+```bash
+python bundle_workflow.py populate-index-pages --word-index "C:\path\to\index.docx" --pagination-report "C:\path\to\output\authorities_bundle_pagination_report.csv" --output-word-index "C:\path\to\output\Authorities Index (with pages).docx"
+```
+
+### GUI workflow (reusable local app)
+
+Use [bundle_gui.py](/C:/github/bates-stamping-tool/bundle_gui.py) for an end-to-end local GUI (**LawPage PDF Bundling Tool v1.0.0**) that supports:
+
+- selecting source folder, index DOCX, output folder,
+- loading/reordering PDFs (up/down/top/bottom),
+- merging in chosen order with `Citation:: Case title` bookmarks,
+- pagination report generation,
+- updating the index DOCX Page column,
+- optional Word-exact index PDF insertion at page 1,
+- option to skip index insertion entirely and output a bundle with no front index PDF,
+- optional full-row index hyperlinks,
+- optional compression and open-with-bookmarks mode.
+- optional one-click stamping (including page-label numbering, no-prefix mode, presets like reverse-blue).
+- save/load full reusable profiles (paths, PDF order, build options, stamp options).
+- one-click **Load Preferred Defaults** button for your standard setup (no prefix, page-label numbering, reverse-blue, bottom-right, linking/compression/outlines enabled).
+- combined **Inputs & PDF Order** tab.
+- separate **Index Settings**, **Page Label Settings**, and **Output** tabs.
+- separate preferred-default actions: build-only defaults, stamp-only defaults, or all defaults.
+- stamp mode guidance in-app (`annotation` overlay vs `merge` content merge).
+- page-label navigation bookmarks use the actual PDF page labels; optional document-bookmark grouping is configured separately.
+- optional grouping of existing top-level document bookmarks under a parent folder (default `NAVIGATE BY DOCUMENT DESCRIPTION`).
+- template-driven index generation with a 2-column table (`Description`, `Page Label`) using thin borders and banded row coloring.
+- index table titles are rendered using Word's built-in **Caption** paragraph style.
+- optional seed table placeholder support: a table captioned `[[INDEX_TABLE_PLACEHOLDER]]` is removed before index tables are generated (useful for carrying table styles in templates).
+- description source option: use PDF filenames (default) or use pre-written descriptions from the index DOCX and fill page numbers only.
+- optional page display mode: start page only, or start-end page range.
+- optional leading **#** column (bundle document index: 1, 2, 3, ...).
+- optional extra column: **PDF Page** (internal PDF page number, 1-based).
+- configurable column labels for **Page Label** and **PDF Page**.
+- configurable page-column width (cm), native Word table style controls (Table style family: Plain/Grid; style picker from detected built-ins; Header/Banded/First/Last flags), and optional page break before each additional index table.
+- generated index tables always set the header row to repeat on subsequent pages.
+- index tables: mandatory **Index (by page label)** plus optional **Index (by document description)**.
+- index preview pane with row counts per selected section before running.
+- style-preview button to generate a sample DOCX table using the current table/page settings.
+
+Install dependencies:
+
+```bash
+pip install python-docx pypdf pymupdf pikepdf
+```
+
+Run:
+
+```bash
+python bundle_gui.py
+```
+
 ### Basic Usage
 
 ```bash
