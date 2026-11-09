@@ -2732,6 +2732,7 @@ class BundleGui(tk.Tk):
                     self._log("Index disabled: skipping DOCX index update/generation.")
 
             final_pdf = merged_pdf
+            index_pages_for_links: Optional[int] = None
             if include_index_enabled:
                 if updated_docx is None:
                     raise RuntimeError("Cannot insert index: updated index DOCX was not generated.")
@@ -2744,6 +2745,7 @@ class BundleGui(tk.Tk):
                 index_pages = prepend_index_pdf(index_pdf, merged_pdf, with_index_pdf)
                 self._log(f"Prepended index pages: {index_pages}")
                 final_pdf = with_index_pdf
+                index_pages_for_links = index_pages
 
                 needs_stamped_page_values = stamp_enabled and generate_index_enabled
                 if generate_index_enabled and (include_pdf_zero_index_enabled or needs_stamped_page_values):
@@ -2797,6 +2799,7 @@ class BundleGui(tk.Tk):
                         refreshed_index_pages = prepend_index_pdf(index_pdf, merged_pdf, with_index_pdf)
                         self._log(f"Prepended index pages after index rebuild: {refreshed_index_pages}")
                         final_pdf = with_index_pdf
+                        index_pages_for_links = refreshed_index_pages
 
                         if refreshed_index_pages == index_pages:
                             stable = True
@@ -2809,23 +2812,6 @@ class BundleGui(tk.Tk):
                             f"using latest index-page offset {index_pages}."
                         )
 
-                if link_rows_enabled:
-                    self._log("Adding full-row index hyperlinks...")
-                    expected_starts = None
-                    if generate_index_enabled:
-                        expected_starts = self._build_expected_index_start_pages(
-                            pdf_list=pdf_list,
-                            index_rows=index_rows,
-                            pagination_rows=pagination,
-                            use_existing_index_descriptions=use_existing_desc_enabled,
-                        )
-                    links = add_full_row_links(
-                        final_pdf,
-                        pagination,
-                        index_pages,
-                        expected_start_pages=expected_starts,
-                    )
-                    self._log(f"Full-row links added: {links}")
             else:
                 self._log("Index insertion disabled; keeping bundle without front index PDF.")
 
@@ -2875,6 +2861,24 @@ class BundleGui(tk.Tk):
             if self.open_outlines.get():
                 self._log("Setting PDF to open with bookmarks panel...")
                 set_open_outlines_in_place(final_pdf)
+
+            if include_index_enabled and link_rows_enabled and index_pages_for_links:
+                self._log("Adding full-row index hyperlinks...")
+                expected_starts = None
+                if generate_index_enabled:
+                    expected_starts = self._build_expected_index_start_pages(
+                        pdf_list=pdf_list,
+                        index_rows=index_rows,
+                        pagination_rows=pagination,
+                        use_existing_index_descriptions=use_existing_desc_enabled,
+                    )
+                links = add_full_row_links(
+                    final_pdf,
+                    pagination,
+                    index_pages_for_links,
+                    expected_start_pages=expected_starts,
+                )
+                self._log(f"Full-row links added: {links}")
 
             output_name = normalize_text(self.output_name.get()) or "Authorities Bundle Final.pdf"
             if not output_name.lower().endswith(".pdf"):
